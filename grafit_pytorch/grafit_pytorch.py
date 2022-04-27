@@ -88,6 +88,18 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+class MemoryStore(object):
+    def __init__(self,input_tensor):
+        self.embeddings = input_tensor
+    def __repr__(self):
+        return f"Tensor with shape {self.embeddings.shape}"
+    def getitem(self,idx):
+        return self.embeddings[idx]
+    def setitem(self,idx,new_embedding):
+        self.embeddings[idx] = new_embedding
+
+
+
 # a wrapper class for the base neural network
 # will manage the interception of the hidden layer output
 # and pipe it into the projecter and predictor nets
@@ -165,6 +177,7 @@ class Grafit(nn.Module):
         hidden_layer = -2,
         projection_size = 256,
         projection_hidden_size = 4096,
+        num_augs = 5,
         augment_fn = None,
         augment_fn2 = None,
         moving_average_decay = 0.99,
@@ -195,6 +208,8 @@ class Grafit(nn.Module):
         self.augment1 = default(augment_fn, DEFAULT_AUG)
         self.augment2 = default(augment_fn2, self.augment1)
 
+        # Number of augmented images for instance loss
+        self.num_augs = num_augs
         self.online_encoder = NetWrapper(net, projection_size, projection_hidden_size, layer=hidden_layer)
 
         self.use_momentum = use_momentum
