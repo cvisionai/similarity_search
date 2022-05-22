@@ -112,9 +112,3 @@ if __name__ == '__main__':
     )
 
     trainer.fit(model, train_loader)
-© 2022 GitHub, Inc.
-Terms
-Privacy
-Security
-Status
-Docs
