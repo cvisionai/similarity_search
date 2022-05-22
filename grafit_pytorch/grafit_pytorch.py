@@ -89,15 +89,20 @@ class MLP(nn.Module):
         return self.net(x)
 
 class MemoryStore(object):
-    def __init__(self,input_tensor):
-        self.embeddings = input_tensor
+    def __init__(self,embedding_tensor,label_tensor,sigma):
+        self.embeddings = embedding_tensor
+        self.labels = label_tensor
+        self.cos = nn.CosineSimilarity(dim=1)
+        self.sigma = sigma
     def __repr__(self):
         return f"Tensor with shape {self.embeddings.shape}"
     def getitem(self,idx):
-        return self.embeddings[idx]
+        return (self.embeddings[idx],self.labels[idx])
     def setitem(self,idx,new_embedding):
         self.embeddings[idx] = new_embedding
-
+    def neighbor_probability(self,test_embedding):
+        # use broadcasting to do cosine similarity of whole memory store
+        return torch.exp(self.cos(self.embeddings, test_embedding)/self.sigma)
 
 
 # a wrapper class for the base neural network
