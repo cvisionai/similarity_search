@@ -8,7 +8,7 @@ import torch
 from torchvision import models, transforms
 from torch.utils.data import DataLoader, Dataset
 
-from byol_pytorch import BYOL
+from grafit_pytorch import Grafit
 import pytorch_lightning as pl
 
 # test model, a resnet 50
@@ -17,7 +17,7 @@ resnet = models.resnet50(pretrained=True)
 
 # arguments
 
-parser = argparse.ArgumentParser(description='byol-lightning-test')
+parser = argparse.ArgumentParser(description='grafit-lightning-test')
 
 parser.add_argument('--image_folder', type=str, required = True,
                        help='path to your folder of images for self-supervised learning')
@@ -39,7 +39,7 @@ NUM_WORKERS = multiprocessing.cpu_count()
 class SelfSupervisedLearner(pl.LightningModule):
     def __init__(self, net, **kwargs):
         super().__init__()
-        self.learner = BYOL(net, **kwargs)
+        self.learner = Grafit(net, **kwargs)
 
     def forward(self, images):
         return self.learner(images)
