@@ -1,2 +1,3 @@
 *.pkl
 *.npy
+grafit_pytorch/examples/reference_images/*
