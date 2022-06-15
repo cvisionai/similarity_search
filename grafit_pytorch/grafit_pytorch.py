@@ -7,6 +7,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from torchvision import transforms as T
+from util import LinearAverage, NCACrossEntropy
 
 # helper functions
 
@@ -45,10 +46,11 @@ def loss_fn(x, y):
     return 2 - 2 * (x * y).sum(dim=-1)
 
 def loss_knn(probs,labels, input_label):
-    normed_probs = F.normalize(probs)
-    # Efficiently sum over labels = xlabel, this is probably not correct right now
-    normed_sum = torch.sum(normed_probs.gather(1,torch.tensor([[idx for idx,label in labels if label == input_label]])))
-    return -1 * torch.log(normed_sum)
+    probs_sum = torch.sum(probs)
+    normed_probs = probs / probs_sum
+    same_normed_sum = torch.sum(normed_probs.gather(1,torch.tensor([[idx for idx,label in labels if label == input_label]])))
+    
+    return -1 * torch.log(same_normed_sum)
 
 # augmentation utils
 
@@ -93,25 +95,6 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.net(x)
-
-class MemoryStore(object):
-    def __init__(self,embedding_tensor,label_tensor,sigma=1e-6):
-        self.embeddings = embedding_tensor
-        self.labels = label_tensor
-        self.cos = nn.CosineSimilarity(dim=1)
-        self.sigma = sigma
-    def __repr__(self):
-        return f"Tensor with shape {self.embeddings.shape}"
-    def getitem(self,idx):
-        return (self.embeddings[idx],self.labels[idx])
-    def get_label(self,idx):
-        return self.labels[idx]
-    def setitem(self,idx,new_embedding):
-        self.embeddings[idx] = 0.5 * (self.embeddings[idx] + new_embedding)
-    def neighbor_probability(self,test_embedding):
-        # use broadcasting to do cosine similarity of whole memory store
-        return torch.exp(self.cos(self.embeddings, test_embedding)/self.sigma)
-
 
 # a wrapper class for the base neural network
 # will manage the interception of the hidden layer output
@@ -187,6 +170,8 @@ class Grafit(nn.Module):
         self,
         net,
         image_size,
+        dataset_size,
+        dataset_labels,
         hidden_layer = -2,
         projection_size = 256,
         projection_hidden_size = 4096,
@@ -194,7 +179,7 @@ class Grafit(nn.Module):
         augment_fn = None,
         augment_fn2 = None,
         moving_average_decay = 0.99,
-        use_momentum = True
+        use_momentum = True,
     ):
         super().__init__()
         self.net = net
@@ -238,14 +223,14 @@ class Grafit(nn.Module):
         # send a mock image tensor to instantiate singleton parameters
         self.forward(torch.randn(2, 3, image_size, image_size, device=device))
 
+        self.lemniscate = LinearAverage(projection_size, dataset_size).cuda()
+        self.criterion = NCACrossEntropy(torch.LongTensor(dataset_labels),0).cuda()
+
     @singleton('target_encoder')
     def _get_target_encoder(self):
         target_encoder = copy.deepcopy(self.online_encoder)
         set_requires_grad(target_encoder, False)
         return target_encoder
-
-    def set_memory_store(self,initial_embedding, labels, sigma=1e-6):
-        self.memory_store = MemoryStore(initial_embedding, labels,sigma)
 
     def reset_moving_average(self):
         del self.target_encoder
@@ -276,9 +261,6 @@ class Grafit(nn.Module):
         online_pred_one = self.online_predictor(online_proj_one)
         online_pred_two = self.online_predictor(online_proj_two)
 
-        # TODO Make this work for batch size > 1
-        knn_prob = self.memory_store.neighbor_probability(self.online_encoder(x)[0])
-
         with torch.no_grad():
             target_encoder = self._get_target_encoder() if self.use_momentum else self.online_encoder
             target_proj_one, _ = target_encoder(image_one)
@@ -289,9 +271,10 @@ class Grafit(nn.Module):
         loss_one = loss_fn(online_pred_one, target_proj_two.detach())
         loss_two = loss_fn(online_pred_two, target_proj_one.detach())
         # TODO Make this work for batch size > 1
-        loss_knn = loss_knn(knn_prob,self.memory_store.get_label(x_idx))
+        output = self.online_encoder(x)
+        output = self.lemniscate(output, x_idx)
+        knn_loss = self.criterion(output,x_idx)
 
-        # TODO Update embeddings
-
-        loss = loss_one + loss_two + loss_knn
-        return loss.mean()
+        inst_loss = loss_one + loss_two
+        loss = inst_loss.mean() + knn_loss
+        return loss
