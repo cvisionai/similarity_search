@@ -2,13 +2,17 @@ import torch
 from torch.autograd import Function
 from torch import nn
 import math
+from torch.utils.data import Dataset
+from PIL import Image
+import os
+import pandas as pd
 
 class LinearAverageOp(Function):
     @staticmethod
     def forward(ctx, x, y, memory, params):
-        T = params[0].item()
+        T = params[0]
         # inner product
-        out = torch.mm(x.data, memory.t())
+        out = torch.mm(x, memory.t())
         out.div_(T) # batchSize * N
         
         ctx.save_for_backward(x, memory, y, params)
@@ -19,19 +23,19 @@ class LinearAverageOp(Function):
     def backward(ctx, gradOutput):
         x, memory, y, params = ctx.saved_tensors
         T = params[0].item()
-        momentum = params[1].item()
+        momentum = params[1]
         
         # add temperature
-        gradOutput.data.div_(T)
+        gradOutput.div_(T)
 
         # gradient of linear
-        gradInput = torch.mm(gradOutput.data, memory)
+        gradInput = torch.mm(gradOutput, memory)
         gradInput.resize_as_(x)
 
         # update the non-parametric data
-        weight_pos = memory.index_select(0, y.data.view(-1)).resize_as_(x)
+        weight_pos = memory.index_select(0, y.view(-1)).resize_as_(x)
         weight_pos.mul_(momentum)
-        weight_pos.add_(torch.mul(x.data, 1-momentum))
+        weight_pos.add_(torch.mul(x, 1-momentum))
         w_norm = weight_pos.pow(2).sum(1, keepdim=True).pow(0.5)
         updated_weight = weight_pos.div(w_norm)
         memory.index_copy_(0, y, updated_weight)
@@ -44,10 +48,9 @@ class LinearAverage(nn.Module):
         super(LinearAverage, self).__init__()
         stdv = 1 / math.sqrt(inputSize)
         self.nLem = outputSize
-
-        self.register_buffer('params',torch.tensor([T, momentum]))
+        self.register_buffer('params',torch.tensor([T, momentum]).to("cuda"))
         stdv = 1. / math.sqrt(inputSize/3)
-        self.register_buffer('memory', torch.rand(outputSize, inputSize).mul_(2*stdv).add_(-stdv))
+        self.register_buffer('memory', torch.rand(outputSize, inputSize).mul_(2*stdv).add_(-stdv).to("cuda"))
 
     def forward(self, x, y):
         out = LinearAverageOp.apply(x, y, self.memory, self.params)
@@ -62,8 +65,9 @@ class NCACrossEntropy(nn.Module):
     '''
     def __init__(self, labels, margin=0):
         super(NCACrossEntropy, self).__init__()
-        self.register_buffer('labels', torch.LongTensor(labels.size(0)))
+        self.register_buffer('labels', torch.LongTensor(labels.size(0)).to("cuda"))
         self.labels = labels
+        #print(self.labels)
         self.margin = margin
 
     def forward(self, x, indexes):
@@ -72,7 +76,8 @@ class NCACrossEntropy(nn.Module):
         exp = torch.exp(x)
         
         # labels for currect batch
-        y = torch.index_select(self.labels, 0, indexes.data).view(batchSize, 1) 
+        #print(f"Printing current batch indices: {indexes}")
+        y = torch.index_select(self.labels, 0, indexes).view(batchSize, 1) 
         same = y.repeat(1, n).eq_(self.labels)
 
        # self prob exclusion, hack with memory for effeciency
@@ -87,3 +92,47 @@ class NCACrossEntropy(nn.Module):
         loss = prob_masked.log().sum(0)
 
         return - loss / batchSize
+
+class FathomnetDataset(Dataset):
+    """Data Set for loading Fathomnet ROIs"""
+    def __init__(self, csv_file, root_dir, transform=None, start_idx=None):
+        self.root_dir = root_dir
+        self.rois = pd.read_csv(csv_file)
+        if start_idx is not None:
+            self.rois = self.rois.loc[start_idx:]
+        self.transform = transform
+
+    def __len__(self):
+        return (len(self.rois))
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        img_name = os.path.join(self.root_dir,self.rois.iloc[idx,0])
+        #print(img_name)
+        x1,y1,x2,y2 = self.rois.iloc[idx,1:5]
+        image = Image.open(img_name)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        # Bounds checking
+        if x1 < 0:
+            x1 = 0
+        if y1 < 0:
+            y1 = 0
+        if x2 > image.width:
+            x2 = image.width
+        if y2 > image.height:
+            y2 = image.height
+
+        assert(x1 < x2 and y1 < y2), f"Bad ROI dimensions: {x1,y1,x2,y2} in {img_name}"
+
+        image = image.crop((x1,y1,x2,y2))
+        image = self.transform(image)
+        sample = {"image" : image, "name" : self.rois.iloc[idx,0], "label" : self.rois.iloc[idx,5], "roi" : {"x1" : x1,"y1" : y1, "x2" : x2, "y2" : y2}, "index" : idx}
+
+        return sample
+    
+    def get_labels(self):
+        labels = self.rois.iloc[:,5].to_list()
+        return labels

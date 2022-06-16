@@ -7,7 +7,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from torchvision import transforms as T
-from util import LinearAverage, NCACrossEntropy
+from grafit_pytorch.util import LinearAverage, NCACrossEntropy
 
 # helper functions
 
@@ -220,11 +220,11 @@ class Grafit(nn.Module):
         device = get_module_device(net)
         self.to(device)
 
-        # send a mock image tensor to instantiate singleton parameters
-        self.forward(torch.randn(2, 3, image_size, image_size, device=device))
-
         self.lemniscate = LinearAverage(projection_size, dataset_size).cuda()
         self.criterion = NCACrossEntropy(torch.LongTensor(dataset_labels),0).cuda()
+
+        # send a mock image tensor to instantiate singleton parameters
+        self.forward(torch.randn(2, 3, image_size, image_size, device=device),torch.Tensor([0,1]))
 
     @singleton('target_encoder')
     def _get_target_encoder(self):
@@ -271,9 +271,10 @@ class Grafit(nn.Module):
         loss_one = loss_fn(online_pred_one, target_proj_two.detach())
         loss_two = loss_fn(online_pred_two, target_proj_one.detach())
         # TODO Make this work for batch size > 1
-        output = self.online_encoder(x)
-        output = self.lemniscate(output, x_idx)
-        knn_loss = self.criterion(output,x_idx)
+        output = self.online_encoder(x)[0]
+        #print(f" printing x_idx: {x_idx}")
+        output = self.lemniscate(output.to("cuda"), torch.tensor(x_idx,dtype=torch.int64,device=torch.device('cuda:0')))
+        knn_loss = self.criterion(output.to("cuda"),torch.tensor(x_idx,dtype=torch.int64,device=torch.device('cuda:0')))
 
         inst_loss = loss_one + loss_two
         loss = inst_loss.mean() + knn_loss
