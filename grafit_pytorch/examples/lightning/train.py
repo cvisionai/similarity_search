@@ -27,9 +27,9 @@ args = parser.parse_args()
 
 # constants
 
-BATCH_SIZE = 16
-EPOCHS     = 1000
-LR         = 3e-4
+BATCH_SIZE = 24
+EPOCHS     = 10
+LR         = 0.001
 NUM_GPUS   = 1
 IMAGE_SIZE = 256
 IMAGE_EXTS = ['.jpg', '.png', '.jpeg']
@@ -79,7 +79,7 @@ if __name__ == '__main__':
         resnet,
         image_size = IMAGE_SIZE,
         hidden_layer = 'avgpool',
-        projection_size = 256,
+        projection_size = 128,
         projection_hidden_size = 4096,
         moving_average_decay = 0.99,
         dataset_size = len(labels),

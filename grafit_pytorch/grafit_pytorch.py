@@ -271,11 +271,14 @@ class Grafit(nn.Module):
         loss_one = loss_fn(online_pred_one, target_proj_two.detach())
         loss_two = loss_fn(online_pred_two, target_proj_one.detach())
         # TODO Make this work for batch size > 1
-        output = self.online_encoder(x)[0]
+        output = self.online_encoder(self.augment1(x))[0]
         #print(f" printing x_idx: {x_idx}")
-        output = self.lemniscate(output.to("cuda"), torch.tensor(x_idx,dtype=torch.int64,device=torch.device('cuda:0')))
-        knn_loss = self.criterion(output.to("cuda"),torch.tensor(x_idx,dtype=torch.int64,device=torch.device('cuda:0')))
+        indices = torch.tensor(x_idx,dtype=torch.int64,device=torch.device('cuda:0'),requires_grad=False)
+        output = self.lemniscate(output, indices.detach())
+        #output = self.lemniscate(online_proj_one, torch.tensor(x_idx,dtype=torch.int64,device=torch.device('cuda:0')))
+        knn_loss = self.criterion(output,indices.detach())
 
         inst_loss = loss_one + loss_two
-        loss = inst_loss.mean() + knn_loss
-        return loss
+        #loss = 0.5 * inst_loss.mean() + 0.5 * knn_loss
+        #print(loss)
+        return 0.5 * knn_loss + 0.5 * inst_loss.mean()

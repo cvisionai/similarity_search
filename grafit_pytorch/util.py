@@ -6,13 +6,15 @@ from torch.utils.data import Dataset
 from PIL import Image
 import os
 import pandas as pd
+import torch.nn.functional as F
 
 class LinearAverageOp(Function):
     @staticmethod
     def forward(ctx, x, y, memory, params):
         T = params[0]
         # inner product
-        out = torch.mm(x, memory.t())
+        #print(x)
+        out = torch.mm(F.normalize(x,dim=1,p=2), memory.t())
         out.div_(T) # batchSize * N
         
         ctx.save_for_backward(x, memory, y, params)
@@ -22,9 +24,8 @@ class LinearAverageOp(Function):
     @staticmethod
     def backward(ctx, gradOutput):
         x, memory, y, params = ctx.saved_tensors
-        T = params[0].item()
+        T = params[0]
         momentum = params[1]
-        
         # add temperature
         gradOutput.div_(T)
 
@@ -32,6 +33,8 @@ class LinearAverageOp(Function):
         gradInput = torch.mm(gradOutput, memory)
         gradInput.resize_as_(x)
 
+        #print(gradInput)
+        #print(f"GradInput shape: {gradInput.shape}")
         # update the non-parametric data
         weight_pos = memory.index_select(0, y.view(-1)).resize_as_(x)
         weight_pos.mul_(momentum)
@@ -39,6 +42,8 @@ class LinearAverageOp(Function):
         w_norm = weight_pos.pow(2).sum(1, keepdim=True).pow(0.5)
         updated_weight = weight_pos.div(w_norm)
         memory.index_copy_(0, y, updated_weight)
+
+        #print(gradInput)
         
         return gradInput, None, None, None
 
@@ -48,15 +53,19 @@ class LinearAverage(nn.Module):
         super(LinearAverage, self).__init__()
         stdv = 1 / math.sqrt(inputSize)
         self.nLem = outputSize
-        self.register_buffer('params',torch.tensor([T, momentum]).to("cuda"))
+        self.register_buffer('params',torch.tensor([T, momentum],requires_grad=False))
         stdv = 1. / math.sqrt(inputSize/3)
-        self.register_buffer('memory', torch.rand(outputSize, inputSize).mul_(2*stdv).add_(-stdv).to("cuda"))
+        #self.register_buffer('memory', torch.rand(outputSize, inputSize).mul_(2*stdv).add_(-stdv).to("cuda"))
+        init = torch.normal(0., 0.01, size=(outputSize, inputSize),requires_grad=False)
+        init_norm = init.pow(2).sum(1,keepdim=True).pow(0.5)
+        init = init.div(init_norm)
+        self.register_buffer('memory', init)
 
     def forward(self, x, y):
         out = LinearAverageOp.apply(x, y, self.memory, self.params)
         return out
 
-eps = 1e-8
+eps = 0.01
 
 class NCACrossEntropy(nn.Module): 
     ''' \sum_{j=C} log(p_{ij})
@@ -65,7 +74,7 @@ class NCACrossEntropy(nn.Module):
     '''
     def __init__(self, labels, margin=0):
         super(NCACrossEntropy, self).__init__()
-        self.register_buffer('labels', torch.LongTensor(labels.size(0)).to("cuda"))
+        self.register_buffer('labels', torch.tensor(labels.size(0),requires_grad=False, device=torch.device('cuda:0'),dtype=torch.long))
         self.labels = labels
         #print(self.labels)
         self.margin = margin
@@ -74,7 +83,6 @@ class NCACrossEntropy(nn.Module):
         batchSize = x.size(0)
         n = x.size(1)
         exp = torch.exp(x)
-        
         # labels for currect batch
         #print(f"Printing current batch indices: {indexes}")
         y = torch.index_select(self.labels, 0, indexes).view(batchSize, 1) 
@@ -87,10 +95,12 @@ class NCACrossEntropy(nn.Module):
         Z = exp.sum(dim=1)
 
         prob = torch.div(p, Z)
+        #min_prob = torch.tensor([eps for i in range(len(prob))],dtype=torch.float,requires_grad=False,device=torch.devic("cuda"))
+        #prob = torch.max(prob,min_prob)
+        #print(prob)
         prob_masked = torch.masked_select(prob, prob.ne(0))
-
+        #print(prob_masked)
         loss = prob_masked.log().sum(0)
-
         return - loss / batchSize
 
 class FathomnetDataset(Dataset):
