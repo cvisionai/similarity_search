@@ -191,6 +191,7 @@ class Grafit(nn.Module):
                 T.ColorJitter(0.8, 0.8, 0.8, 0.2),
                 p = 0.3
             ),
+            T.RandomAffine(degrees=25,shear=[-10,10,-10,10]),
             T.RandomGrayscale(p=0.2),
             T.RandomHorizontalFlip(),
             RandomApply(
@@ -203,6 +204,14 @@ class Grafit(nn.Module):
                 std=torch.tensor([0.229, 0.224, 0.225])),
         )
 
+        INFERENCE_AUG = torch.nn.Sequential(
+            T.Normalize(
+                mean=torch.tensor([0.485, 0.456, 0.406]),
+                std=torch.tensor([0.229, 0.224, 0.225]))
+        )
+
+        self.inference_augment = INFERENCE_AUG
+        #print("Inference Augmentation created!")
         self.augment1 = default(augment_fn, DEFAULT_AUG)
         self.augment2 = default(augment_fn2, self.augment1)
 
@@ -251,7 +260,9 @@ class Grafit(nn.Module):
         assert not (self.training and x.shape[0] == 1), 'you must have greater than 1 sample when training, due to the batchnorm in the projection layer'
 
         if return_embedding:
-            return self.online_encoder(x, return_projection = return_projection)
+            inf_image = self.inference_augment(x)
+            #print(f"Type: {type(x)}")
+            return self.online_encoder(inf_image, return_projection = return_projection)
 
         image_one, image_two = self.augment1(x), self.augment2(x)
 
