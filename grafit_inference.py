@@ -42,8 +42,7 @@ class SelfSupervisedLearner(pl.LightningModule):
             self.learner.update_moving_average()
 
 if __name__ == "__main__":
-    pth = '/home/ben/code/similarity_search/grafit_pytorch/examples/lightning/lightning_logs/version_0/checkpoints/epoch=71-step=508608.ckpt'
-
+    
     BATCH_SIZE = 24
     EPOCHS     = 10
     LR         = 0.001
@@ -85,12 +84,12 @@ if __name__ == "__main__":
             dataset_labels = labels_numeric
         )
 
-    checkpoint = torch.load('/home/ben/code/similarity_search/grafit_pytorch/examples/lightning/lightning_logs/version_0/checkpoints/epoch71-test.ckpt')
+    checkpoint = torch.load('/home/ben/code/similarity_search/grafit_pytorch/examples/lightning/lightning_logs/version_1/checkpoints/epoch=299-step=2119200.ckpt')
 
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, shuffle=False)
+    train_loader = DataLoader(ds, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, shuffle=False)
 
     trainer = Trainer(accelerator="gpu", devices=1)
     predictions = trainer.predict(model, dataloaders=train_loader)
-    pickle.dump(predictions,open('/home/ben/code/similarity_search/grafit_inference_results_train-epoch71.pkl','wb'))
+    pickle.dump(predictions,open('/home/ben/code/similarity_search/grafit_inference_results_val-epoch299.pkl','wb'))
